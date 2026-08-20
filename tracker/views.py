@@ -58,25 +58,67 @@ def api_emails(request):
     return JsonResponse(email.to_dict(), status=201)
 
 
-@require_http_methods(['GET'])
+def is_compose_or_preview_request(request):
+    """
+    Detect if the incoming pixel request is coming from an email client's
+    compose window (e.g. pasting into Gmail's 'Insert photo -> Web Address (URL)'),
+    a link previewer, or a HEAD request.
+    """
+    # 1. HEAD requests are metadata checks (e.g. checking image dimensions), not actual views
+    if request.method == 'HEAD':
+        return True
+
+    # 2. Check Referer header for mail client compose web applications
+    referer = request.META.get('HTTP_REFERER', '').lower()
+    compose_domains = [
+        'mail.google.com',
+        'mail.yahoo.com',
+        'outlook.live.com',
+        'outlook.office.com',
+        'outlook.office365.com',
+        'mail.aol.com',
+        'mail.com',
+        'zoho.com',
+        'proton.me',
+        'protonmail.com',
+        'icloud.com',
+        'web.whatsapp.com',
+        'slack.com',
+        'teams.microsoft.com',
+        'discord.com',
+    ]
+    if any(domain in referer for domain in compose_domains):
+        return True
+
+    # 3. Check prefetch/preview headers sent by browsers or mail clients
+    purpose = request.META.get('HTTP_PURPOSE', '').lower()
+    x_purpose = request.META.get('HTTP_X_PURPOSE', '').lower()
+    sec_purpose = request.META.get('HTTP_SEC_PURPOSE', '').lower()
+    if any(p in ['prefetch', 'preview'] for p in [purpose, x_purpose, sec_purpose]):
+        return True
+
+    return False
+
+
+@require_http_methods(['GET', 'HEAD'])
 def track_pixel(request, email_id):
     """
-    The tracking pixel itself. Embed <img src="/track/<id>.png"> in an
-    outgoing email; when the recipient's client loads this image, we log
-    an "open" event. This always returns a valid image, even for an
-    unknown or malformed id — a broken image icon in someone's inbox would
-    be a dead giveaway that something's being tracked.
+    The tracking pixel itself. Embed the pixel URL in an outgoing email;
+    when the recipient's client loads this image, we log an "open" event.
+    This always returns a valid image. Compose/preview requests are served
+    without logging an open event.
     """
-    try:
-        parsed_id = uuid_lib.UUID(email_id)
-        email = TrackedEmail.objects.get(pk=parsed_id)
-        EmailOpen.objects.create(
-            email=email,
-            user_agent=request.META.get('HTTP_USER_AGENT', 'unknown')[:500],
-            ip_address=request.META.get('REMOTE_ADDR'),
-        )
-    except (ValueError, TrackedEmail.DoesNotExist):
-        pass
+    if not is_compose_or_preview_request(request):
+        try:
+            parsed_id = uuid_lib.UUID(email_id)
+            email = TrackedEmail.objects.get(pk=parsed_id)
+            EmailOpen.objects.create(
+                email=email,
+                user_agent=request.META.get('HTTP_USER_AGENT', 'unknown')[:500],
+                ip_address=request.META.get('REMOTE_ADDR'),
+            )
+        except (ValueError, TrackedEmail.DoesNotExist):
+            pass
 
     response = HttpResponse(PIXEL, content_type='image/png')
     # Never cache the pixel — a cached image never triggers a fresh request,

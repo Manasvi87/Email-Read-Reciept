@@ -155,8 +155,7 @@ els.form.addEventListener('submit', async (e) => {
     await loadEmails();
 
     const pixelUrl = `${window.location.origin}/track/${data.id}.png`;
-    els.snippetCode.textContent =
-      `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
+    els.snippetCode.textContent = pixelUrl;
     els.snippetCard.hidden = false;
     els.simulateHint.hidden = true;
     els.form.reset();
