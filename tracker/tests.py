@@ -54,10 +54,44 @@ class TrackerTests(TestCase):
         self.assertEqual(EmailOpen.objects.filter(email=self.email).count(), 1)
         self.assertEqual(self.email.open_count, 1)
 
+    def test_gmail_proxy_during_compose_window_is_ignored(self):
+        """
+        When pasting into Gmail, Google Image Proxy fetches the image URL server-side.
+        If this proxy request occurs during the compose window (within 5 min of creation),
+        it should be ignored and NOT log an open.
+        """
+        url = f'/track/{self.email.id}.png'
+        response = self.client.get(
+            url,
+            HTTP_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (via ggpht.com Google Image Proxy)'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(EmailOpen.objects.filter(email=self.email).count(), 0)
+
+    def test_gmail_proxy_after_compose_window_is_counted(self):
+        """
+        When the recipient opens the email after the compose window (>5 min),
+        Google Image Proxy request SHOULD log an open event.
+        """
+        from datetime import timedelta
+        from django.utils import timezone
+        # Simulate email created 10 minutes ago
+        self.email.created_at = timezone.now() - timedelta(minutes=10)
+        self.email.save()
+
+        url = f'/track/{self.email.id}.png'
+        response = self.client.get(
+            url,
+            HTTP_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (via ggpht.com Google Image Proxy)'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(EmailOpen.objects.filter(email=self.email).count(), 1)
+
     def test_simulate_open_is_counted(self):
         """Simulate Open from dashboard must log an open event."""
         url = f'/track/{self.email.id}.png?cb=123456789'
         response = self.client.get(url, HTTP_REFERER='http://127.0.0.1:8000/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(EmailOpen.objects.filter(email=self.email).count(), 1)
+
 

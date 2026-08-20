@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
-from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
@@ -58,7 +58,7 @@ def api_emails(request):
     return JsonResponse(email.to_dict(), status=201)
 
 
-def is_compose_or_preview_request(request):
+def is_compose_or_preview_request(request, email=None):
     """
     Detect if the incoming pixel request is coming from an email client's
     compose window (e.g. pasting into Gmail's 'Insert photo -> Web Address (URL)'),
@@ -97,6 +97,18 @@ def is_compose_or_preview_request(request):
     if any(p in ['prefetch', 'preview'] for p in [purpose, x_purpose, sec_purpose]):
         return True
 
+    # 4. Check Google Image Proxy or webmail proxies during the compose/creation window
+    user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+    proxy_keywords = ['via ggpht.com', 'googleimageproxy', 'google-proxy', 'yahoomailproxy']
+    is_proxy = any(k in user_agent for k in proxy_keywords)
+
+    if email and is_proxy:
+        time_since_creation = (timezone.now() - email.created_at).total_seconds()
+        # If proxy request occurs within 300 seconds (5 minutes) of pixel creation,
+        # it is Gmail's compose window previewing/rendering the inserted image URL.
+        if time_since_creation < 300:
+            return True
+
     return False
 
 
@@ -108,17 +120,19 @@ def track_pixel(request, email_id):
     This always returns a valid image. Compose/preview requests are served
     without logging an open event.
     """
-    if not is_compose_or_preview_request(request):
-        try:
-            parsed_id = uuid_lib.UUID(email_id)
-            email = TrackedEmail.objects.get(pk=parsed_id)
-            EmailOpen.objects.create(
-                email=email,
-                user_agent=request.META.get('HTTP_USER_AGENT', 'unknown')[:500],
-                ip_address=request.META.get('REMOTE_ADDR'),
-            )
-        except (ValueError, TrackedEmail.DoesNotExist):
-            pass
+    email = None
+    try:
+        parsed_id = uuid_lib.UUID(email_id)
+        email = TrackedEmail.objects.get(pk=parsed_id)
+    except (ValueError, TrackedEmail.DoesNotExist):
+        pass
+
+    if email and not is_compose_or_preview_request(request, email=email):
+        EmailOpen.objects.create(
+            email=email,
+            user_agent=request.META.get('HTTP_USER_AGENT', 'unknown')[:500],
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
 
     response = HttpResponse(PIXEL, content_type='image/png')
     # Never cache the pixel — a cached image never triggers a fresh request,
