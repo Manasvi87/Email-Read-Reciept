@@ -104,9 +104,9 @@ def is_compose_or_preview_request(request, email=None):
 
     if email and is_proxy:
         time_since_creation = (timezone.now() - email.created_at).total_seconds()
-        # If proxy request occurs within 300 seconds (5 minutes) of pixel creation,
+        # If proxy request occurs within 60 seconds of pixel creation,
         # it is Gmail's compose window previewing/rendering the inserted image URL.
-        if time_since_creation < 300:
+        if time_since_creation < 60:
             return True
 
     return False

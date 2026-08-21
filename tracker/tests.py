@@ -57,7 +57,7 @@ class TrackerTests(TestCase):
     def test_gmail_proxy_during_compose_window_is_ignored(self):
         """
         When pasting into Gmail, Google Image Proxy fetches the image URL server-side.
-        If this proxy request occurs during the compose window (within 5 min of creation),
+        If this proxy request occurs during the compose window (within 60s of creation),
         it should be ignored and NOT log an open.
         """
         url = f'/track/{self.email.id}.png'
@@ -70,13 +70,13 @@ class TrackerTests(TestCase):
 
     def test_gmail_proxy_after_compose_window_is_counted(self):
         """
-        When the recipient opens the email after the compose window (>5 min),
+        When the recipient opens the email after the compose window (>60s),
         Google Image Proxy request SHOULD log an open event.
         """
         from datetime import timedelta
         from django.utils import timezone
-        # Simulate email created 10 minutes ago
-        self.email.created_at = timezone.now() - timedelta(minutes=10)
+        # Simulate email created 2 minutes ago (>60s)
+        self.email.created_at = timezone.now() - timedelta(seconds=120)
         self.email.save()
 
         url = f'/track/{self.email.id}.png'
